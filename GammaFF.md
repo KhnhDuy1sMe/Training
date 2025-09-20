@@ -36,10 +36,11 @@ flowchart TD
 ## Explanation
 This algorithm attempts to find a new VM arrangement to free up at least one target physical server (`PM_empty`).
 
-- **Imax:** Maximum number of iterations to attempt.
+- **Imax:** maximum number of iterations allowed.
 - **k:** The number of VMs to randomly sample from each non-empty PM.
 - **U_max_i:** The maximum resource utilization of VM *i* (e.g., CPU usage).
-- **Cj * yj:** The total resource capacity of PM *j*.
+- **Cj:** Total capacity of CPU of PM j.
+- **j:** Binary variable, yj = 1 if there is at least one VM assigned to this PM and otherwise yj = 0.
 - **Queue Q:** A collection of VMs that need to be re-placed.
 - The inner loops try to find a new home for each VM in the sorted queue `Q`.
 - If all VMs in `Q` can be placed, the algorithm succeeds.
