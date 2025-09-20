@@ -23,23 +23,23 @@ flowchart TD
     N --> O{VM Placed?}
     O -- Yes --> H
     O -- No --> P[Break out of VM loop]
-    P --> R{Is Q empty?<br>(All VMs placed)?}
+    P --> R{Is Q empty?<br>All VMs placed?}
     R -- Yes --> T[Commit changes<br>Success = True]
     R -- No --> U[Iter_count += 1<br>Reset all PM & VM states]
     U --> C
     T --> C
     C -- No --> V{Success = True?}
     V -- Yes --> W([Return Optimized Placement])
-    V -- No --> X([Return &quot;No valid placement found&quot;])
+    V -- No --> X([Return "No valid placement found"])
 ```
 ## Explanation
 This algorithm attempts to find a new VM arrangement to free up at least one target physical server (`PM_empty`).
 
 - **Imax:** Maximum number of iterations to attempt.
-- **k:** The number of VMs to randomly sample from each non-empty PM (to potentially re-place them and free up the target PM).
-- **U_max_i:** The maximum resource utilization of VM *i* (e.g., CPU usage). Sorting by this in descending order prioritizes placing the most demanding VMs first, which is a common heuristic for avoiding resource fragmentation.
-- **Cj * yj:** The total resource capacity of PM *j*. The condition `Usage ≤ Cj * yj` ensures a VM is only placed on a PM if it has sufficient remaining resources.
-- **Queue Q:** A collection of VMs that need to be re-placed. It's initialized with all VMs from the target `PM_empty` and is then augmented with samples from other PMs.
+- **k:** The number of VMs to randomly sample from each non-empty PM.
+- **U_max_i:** The maximum resource utilization of VM *i* (e.g., CPU usage).
+- **Cj * yj:** The total resource capacity of PM *j*.
+- **Queue Q:** A collection of VMs that need to be re-placed.
 - The inner loops try to find a new home for each VM in the sorted queue `Q`.
-- If all VMs in `Q` can be placed elsewhere, the changes are committed, and the algorithm succeeds, freeing the target `PM_empty`.
-- If any VM cannot be placed, the algorithm resets the state and tries again with a new iteration (up to `Imax` times).
+- If all VMs in `Q` can be placed, the algorithm succeeds.
+- If any VM cannot be placed, the algorithm resets and tries again.
