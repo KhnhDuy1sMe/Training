@@ -32,6 +32,7 @@ flowchart TD
     V -- "Yes" --> W["Return Optimized Placement"]
     V -- "No" --> X["Return 'No valid placement found'"]
 ```
+
 ## Explanation
 This algorithm attempts to find a new VM arrangement to free up at least one target physical server (`PM_empty`).
 
