@@ -1,7 +1,6 @@
 # Training
 # Energy-Efficient Cloud Systems: Virtual Machine Consolidation with Γ-Robustness Optimization
 
-> **Paper Summary** | Han et al., 2025, iScience 28, 111897  
 > **DOI:** [https://doi.org/10.1016/j.isci.2025.111897](https://doi.org/10.1016/j.isci.2025.111897)
 
 ## 📌 Overview
