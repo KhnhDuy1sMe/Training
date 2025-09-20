@@ -7,6 +7,15 @@
 ## 📌 Overview
 
 This repository provides a summary and implementation details for the paper **"Energy-efficient cloud systems: Virtual machine consolidation with Γ-robustness optimization"** by Han et al. (2025). The paper addresses the critical challenge of optimizing **Virtual Machine (VM) consolidation** in cloud data centers to improve energy efficiency while handling the uncertainty of VM resource usage through **Γ-robustness optimization**.
+---
+title: Active PMs Number Comparison
+---
+bar
+    title "Active PMs Number"
+    x-axis ["Initial", "Current/F"]
+    y-axis "Number of PMs" 0 --> 20
+    "Initial value" : 15
+    "Current/F" : 9
 
 ## 🎯 Key Contributions
 
