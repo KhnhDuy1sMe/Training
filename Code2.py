@@ -15,6 +15,7 @@ def create_gamma_list(max_num: int, p_violate: float):
     Gamma_list = pd.read_csv(robust_file_path)
     Gamma_list = Gamma_list.sort_values(by=['n', 'gamma'])
 
+    
     N_Gamma_map = [(0, 0)]
     for i in range(1, max_num + 1):
         frame = Gamma_list[Gamma_list['n'] == i]
