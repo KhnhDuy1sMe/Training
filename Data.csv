@@ -1,6 +1,6 @@
 Number of PMs , Total VMs , Time GFF , Gamma FF Migration , Gamma FF PMs , Time ORT , Gamma OR-Tool Migration , OR-Tool PMs
 10,236,0.322,183,6,26.322,77,6
-20,566,0.5114,524,12,0,0,12
+20,566,0.5114,524,12,101.8602,183,12
 30,546,0.5239,527,13,0,0,16
 40,1040,0.8048,1006,24,0,0,24
 50,1184,0.7961,1140,29,0,0,29
