@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+import json
+import copy
+import random
+import math
+import os
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Iterable, Tuple, Any 
+
+import numpy as np
+import pandas as pd
+
+# ==============================
+# 1. CONFIGURATION (Cấu hình)
+# ==============================
+FILE_CPU_JSON = r"E:\VM 2025\Data\vm\vm\vm_cpu_usage\vm_cpu_usage_2024-10-08_2024-10-09.json"
+FILE_RAM_JSON = r"E:\VM 2025\Data\vm\vm\vm_ram_allocated\vm_ram_allocated_2024-10-08_2024-10-09.json"
+FILE_ROBUST_CSV = r"E:\VM 2025\Data\robust_1000.csv"
+
+# CẤU HÌNH MÁY CHỦ VẬT LÝ (PM)
+PM_CPU_CAPACITY = 128.0   # Tổng số vCPUs
+PM_MEM_CAPACITY = 2048.0  # Tổng RAM (GB)
+PM_CPU_THRESHOLD = 0.9    # Ngưỡng an toàn 90%
+
+# THAM SỐ THUẬT TOÁN
+P_VIOLATE = 0.05          
+SAMPLE_RATIO = 0.15       
+MAX_ITER = 30             
+
+# ==============================
+# 2. DATA MODELS
+# ==============================
+
+@dataclass
+class VM:
+    id: str
+    name: str
+    u_c: float      # Center (Trung bình)
+    u_r: float      # Radius (Dao động)
+    mem: float      # Memory (GB)
+    pm_id: Optional[str] = None
+
+    @property
+    def u_max(self) -> float:
+        return self.u_c + self.u_r
+
+@dataclass
+class PM:
+    id: str
+    cpu_cap: float
+    mem_cap: float
+    vms: List[str] = field(default_factory=list)
+    active: bool = True
+
+    def __repr__(self) -> str:
+        return f"PM(id='{self.id}', vms={len(self.vms)})"
+
+# ==============================
+# 3. HELPER FUNCTIONS
+# ==============================
+
+def create_gamma_list(max_num: int, p_violate: float, csv_path: str) -> List[int]:
+    gamma_map = [0] * (max_num + 1)
+    if os.path.exists(csv_path):
+        try:
+            df = pd.read_csv(csv_path)
+            df.columns = [c.lower().strip() for c in df.columns]
+            prob_col = 'prob' if 'prob' in df.columns else df.columns[2]
+            df = df.sort_values(by=['n', 'gamma'])
+            for n_val in range(1, max_num + 1):
+                sub = df[df['n'] == n_val]
+                if sub.empty:
+                    gamma_map[n_val] = gamma_map[n_val-1]
+                    continue
+                valid = sub[sub[prob_col] < p_violate]
+                if not valid.empty:
+                    gamma_map[n_val] = int(valid.iloc[0]['gamma'])
+                else:
+                    gamma_map[n_val] = int(sub.iloc[-1]['gamma'])
+            print(f"[INFO] Đã load Gamma map từ {csv_path}")
+            return gamma_map
+        except Exception:
+            pass
+
+    print(f"[INFO] Đang tạo Gamma map bằng công thức xấp xỉ...")
+    for n in range(1, max_num + 1):
+        val = math.sqrt(2 * n * math.log(1/p_violate))
+        gamma_map[n] = min(n, int(math.ceil(val)))
+    return gamma_map
+
+def robust_cpu_usage_dynamic(vms_on_pm: Iterable[VM], gamma_map: List[int]) -> float:
+    vms_list = list(vms_on_pm)
+    n = len(vms_list)
+    if n == 0: return 0.0
+    sum_uc = sum(vm.u_c for vm in vms_list)
+    radii = sorted((vm.u_r for vm in vms_list), reverse=True)
+    gamma = gamma_map[n] if n < len(gamma_map) else n
+    sum_ur_top = sum(radii[:gamma])
+    return sum_uc + sum_ur_top
+
+def can_place_vm(vm: VM, pm: PM, all_vms: Dict[str, VM], gamma_map: List[int]) -> bool:
+    current_mem = sum(all_vms[vid].mem for vid in pm.vms)
+    if current_mem + vm.mem > pm.mem_cap:
+        return False
+    current_vms_obj = [all_vms[vid] for vid in pm.vms]
+    current_vms_obj.append(vm)
+    rob_cpu = robust_cpu_usage_dynamic(current_vms_obj, gamma_map)
+    if rob_cpu > pm.cpu_cap:
+        return False
+    return True
+
+# ==============================
+# 4. DATA LOADER
+# ==============================
+
+def load_data_merged(cpu_path: str, ram_path: str) -> Tuple[List[PM], List[VM]]:
+    print(f"--- Đang đọc dữ liệu ---")
+    
+    def extract_results(raw_data):
+        if isinstance(raw_data, list):
+            if len(raw_data) > 0 and isinstance(raw_data[0], dict):
+                if 'data' in raw_data[0] and 'result' in raw_data[0]['data']:
+                    return raw_data[0]['data']['result']
+            return raw_data 
+        if isinstance(raw_data, dict):
+            if 'data' in raw_data and 'result' in raw_data['data']:
+                return raw_data['data']['result']
+        return raw_data
+
+    if not os.path.exists(cpu_path) or not os.path.exists(ram_path):
+        raise FileNotFoundError("Không tìm thấy file JSON.")
+
+    with open(cpu_path, 'r', encoding='utf-8') as f:
+        cpu_results = extract_results(json.load(f))
+    with open(ram_path, 'r', encoding='utf-8') as f:
+        ram_results = extract_results(json.load(f))
+
+    ram_map = {}
+    for item in ram_results:
+        metric = item.get('metric', {})
+        uuid = metric.get('uuid') or metric.get('uid') or metric.get('instance')
+        if not uuid: continue
+        values = item.get('values', [])
+        if values:
+            try:
+                ram_map[uuid] = float(values[-1][1])
+            except: pass
+
+    vms_dict = {}
+    pms_dict = {}
+
+    for item in cpu_results:
+        metric = item.get('metric', {})
+        uuid = metric.get('uuid') or metric.get('instance_id')
+        hostname = metric.get('hostname') or metric.get('host')
+        instance_name = metric.get('instance_name', uuid)
+        
+        if not uuid or not hostname: continue
+        values = item.get('values', [])
+        if not values: continue
+        
+        try:
+            series = np.array([float(v[1]) for v in values])
+        except: continue
+        if len(series) == 0: continue
+
+        # Theo bài báo: 90th - 10th percentile
+        p_upper = np.percentile(series, 95)
+        p_lower = np.percentile(series, 5)
+        u_c = (p_upper + p_lower) / 2.0
+        u_r = (p_upper - p_lower) / 2.0
+        
+        if u_c < 0.001: u_c = 0.001
+        if u_r < 0.01: u_r = 0.05 * u_c
+
+        mem_gb = ram_map.get(uuid, 4.0)
+        vm = VM(id=uuid, name=instance_name, u_c=u_c, u_r=u_r, mem=mem_gb, pm_id=hostname)
+        vms_dict[uuid] = vm
+
+        if hostname not in pms_dict:
+            pms_dict[hostname] = PM(id=hostname, cpu_cap=PM_CPU_CAPACITY * PM_CPU_THRESHOLD, mem_cap=PM_MEM_CAPACITY, active=True)
+        pms_dict[hostname].vms.append(uuid)
+
+    print(f"[INFO] Đã load: {len(vms_dict)} VMs trên {len(pms_dict)} PMs.")
+    return list(pms_dict.values()), list(vms_dict.values())
+
+# ==============================
+# 5. SOLVER
+# ==============================
+
+class GammaFFSolver:
+    def __init__(self, pms: List[PM], vms: List[VM], gamma_map: List[int], sample_ratio=0.1, max_iter=50):
+        self.gamma_map = gamma_map
+        self.sample_ratio = sample_ratio
+        self.max_iter = max_iter
+        self.rng = random.Random(42)
+        self._vms = {vm.id: copy.deepcopy(vm) for vm in vms}
+        self._pms = {pm.id: copy.deepcopy(pm) for pm in pms}
+        self._sync()
+
+    def _sync(self):
+        for pm in self._pms.values(): pm.vms = []
+        for vm in self._vms.values():
+            if vm.pm_id and vm.pm_id in self._pms:
+                self._pms[vm.pm_id].vms.append(vm.id)
+        for pm in self._pms.values(): pm.active = bool(pm.vms)
+
+    def count_active_pms(self):
+        return sum(1 for pm in self._pms.values() if pm.vms)
+
+    def run(self):
+        print(f"--- Bắt đầu tối ưu hóa (Max Iter: {self.max_iter}) ---")
+        for i in range(self.max_iter):
+            active_pms = [pm for pm in self._pms.values() if pm.vms]
+            if not active_pms: break
+            active_pms.sort(key=lambda x: len(x.vms))
+            target_pm = active_pms[0]
+            
+            queue_vm_ids = list(target_pm.vms)
+            other_pms = [p for p in active_pms if p.id != target_pm.id]
+            for opm in other_pms:
+                k = int(len(opm.vms) * self.sample_ratio)
+                if k > 0: queue_vm_ids.extend(self.rng.sample(opm.vms, k))
+            
+            queue_vm_ids = list(set(queue_vm_ids))
+            queue_vm_ids.sort(key=lambda vid: self._vms[vid].u_max, reverse=True)
+            
+            saved_pms = copy.deepcopy(self._pms)
+            saved_vms = {vid: copy.deepcopy(self._vms[vid]) for vid in queue_vm_ids}
+            
+            for vid in queue_vm_ids:
+                curr_pm = self._vms[vid].pm_id
+                if curr_pm and curr_pm in self._pms and vid in self._pms[curr_pm].vms:
+                    self._pms[curr_pm].vms.remove(vid)
+                self._vms[vid].pm_id = None
+
+            success = True
+            candidate_pms = [p for p in self._pms.values() if p.id != target_pm.id]
+            candidate_pms.sort(key=lambda x: x.id)
+            
+            for vid in queue_vm_ids:
+                vm = self._vms[vid]
+                placed = False
+                for pm in candidate_pms:
+                    if can_place_vm(vm, pm, self._vms, self.gamma_map):
+                        pm.vms.append(vm.id)
+                        vm.pm_id = pm.id
+                        pm.active = True
+                        placed = True
+                        break
+                if not placed:
+                    success = False
+                    break
+            
+            if success:
+                for pm in self._pms.values(): pm.active = bool(pm.vms)
+            else:
+                self._pms = saved_pms
+                for vid, v_obj in saved_vms.items(): self._vms[vid] = v_obj
+        return True
+
+    def print_result(self):
+        active_count = self.count_active_pms()
+        total_pms = len(self._pms)
+        print(f"\n=== KẾT QUẢ CUỐI CÙNG ===")
+        print(f"Tổng PM ban đầu : {total_pms}")
+        print(f"Số PM Active    : {active_count}")
+        print(f"Số PM Tắt được  : {total_pms - active_count}")
+        
+        # In tiêu đề cột rõ ràng
+        # CPU Avg %: Là tải trung bình thực tế (Nominal Load)
+        # CPU Rob %: Là tải tính toán có bao gồm đệm an toàn (Robust Load)
+        header = f"{'PM Hostname':<18} {'#VMs':<5} {'RAM(GB)':<8} {'RAM %':<8} {'CPU Avg(Core)':<14} {'CPU Avg %':<10} {'CPU Rob %':<10}"
+        print("-" * len(header))
+        print(header)
+        print("-" * len(header))
+        
+        for pm in sorted(self._pms.values(), key=lambda x: x.id):
+            if not pm.active: continue
+            vms_obj = [self._vms[vid] for vid in pm.vms]
+            
+            # 1. Tính RAM
+            total_mem = sum(v.mem for v in vms_obj)
+            ram_pct = (total_mem / pm.mem_cap) * 100
+            
+            # 2. Tính CPU Robust (Có cộng thêm Gamma * u_r)
+            rob_cpu = robust_cpu_usage_dynamic(vms_obj, self.gamma_map)
+            rob_pct = (rob_cpu / pm.cpu_cap) * 100
+            
+            # 3. Tính CPU Average/Nominal (Chỉ cộng u_c, không thêm gì cả)
+            avg_cpu = sum(v.u_c for v in vms_obj)
+            avg_pct = (avg_cpu / pm.cpu_cap) * 100
+            
+            print(f"{pm.id:<18} {len(pm.vms):<5} {total_mem:<8.1f} {ram_pct:<8.1f} {avg_cpu:<14.2f} {avg_pct:<10.1f} {rob_pct:<10.1f}")
+
+# ==============================
+# 6. MAIN
+# ==============================
+
+def main():
+    try:
+        pms, vms = load_data_merged(FILE_CPU_JSON, FILE_RAM_JSON)
+    except Exception as e:
+        print(f"LỖI: {e}")
+        return
+
+    if not vms:
+        print("Không có dữ liệu VM.")
+        return
+
+    gamma_map = create_gamma_list(len(vms), P_VIOLATE, FILE_ROBUST_CSV)
+    solver = GammaFFSolver(pms, vms, gamma_map, SAMPLE_RATIO, MAX_ITER)
+    
+    print(f"\n--- Trạng thái ban đầu: {solver.count_active_pms()} PMs ---")
+    solver.run()
+    solver.print_result()
+
+if __name__ == "__main__":
+    main()
+    
