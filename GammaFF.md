@@ -5,7 +5,7 @@ This flowchart describes a heuristic algorithm for optimizing the placement of V
 ## Flowchart
 
 ```mermaid
-flowchart TD
+flowchart LR
     A["Start"] --> B["Initialize:<br>Iter_count = 0<br>Success = False<br>Q = ∅"]
     B --> C{"Iter_count < Imax<br>and Success = False?"}
     C -- "Yes" --> D["Select and mark an empty PM (PM_empty)"]
